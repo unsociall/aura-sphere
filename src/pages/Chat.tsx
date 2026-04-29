@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ParticleSphere } from "@/components/ParticleSphere";
 import { supabase } from "@/integrations/supabase/client";
-import type { ChatMessage, SphereState, VoiceId } from "@/lib/types";
+import type { ChatMessage, ParticleShape, SphereState, VoiceId } from "@/lib/types";
 import { createRecognition, getVoiceConfig, speak, stopSpeaking } from "@/lib/speech";
+import { inferShape } from "@/lib/shapes";
 import { toast } from "sonner";
 
 const STATE_LABELS: Record<SphereState, string> = {
@@ -32,6 +33,7 @@ export default function Chat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [state, setState] = useState<SphereState>("idle");
+  const [shape, setShape] = useState<ParticleShape>("sphere");
   const [recording, setRecording] = useState(false);
   const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -53,6 +55,21 @@ export default function Chat({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, state]);
+
+  // Update particle shape based on conversation context
+  useEffect(() => {
+    if (messages.length === 0) {
+      setShape("sphere");
+      return;
+    }
+    const last = messages[messages.length - 1];
+    // Prefer assistant content if available, otherwise the user's latest message
+    const text =
+      last.role === "assistant"
+        ? last.content
+        : messages.slice().reverse().find((m) => m.role === "assistant")?.content || last.content;
+    setShape(inferShape(text));
+  }, [messages]);
 
   const persist = async (msg: ChatMessage) => {
     await supabase.from("chat_messages").insert({ user_id: userId, role: msg.role, content: msg.content });
@@ -227,7 +244,7 @@ export default function Chat({
       {/* Sphere */}
       <section className="relative flex flex-col items-center justify-center px-4 pt-2 pb-1">
         <div className="w-full max-w-sm aspect-square max-h-[42vh]">
-          <ParticleSphere state={state} />
+          <ParticleSphere state={state} shape={shape} />
         </div>
         <div
           className={`mt-1 text-xs uppercase tracking-[0.25em] font-medium animate-fade-in ${
