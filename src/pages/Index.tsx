@@ -1,16 +1,77 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import Login from "./Login";
+import Onboarding from "./Onboarding";
+import Chat from "./Chat";
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
-  return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
-    </div>
-  );
+type Profile = {
+  ai_name: string | null;
+  voice_id: string | null;
+  onboarded: boolean;
 };
 
-const Index = PlaceholderIndex;
+const Index = () => {
+  const { user, loading } = useAuth();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+    setProfileLoading(true);
+    supabase
+      .from("profiles")
+      .select("ai_name, voice_id, onboarded")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setProfile(data ?? { ai_name: null, voice_id: null, onboarded: false });
+        setProfileLoading(false);
+      });
+  }, [user]);
+
+  if (loading || (user && profileLoading)) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center text-muted-foreground text-sm">
+        Carregando…
+      </div>
+    );
+  }
+
+  if (!user) return <Login />;
+
+  if (!profile?.onboarded || editing) {
+    return (
+      <Onboarding
+        userId={user.id}
+        onDone={async () => {
+          const { data } = await supabase
+            .from("profiles")
+            .select("ai_name, voice_id, onboarded")
+            .eq("id", user.id)
+            .maybeSingle();
+          setProfile(data ?? null);
+          setEditing(false);
+        }}
+      />
+    );
+  }
+
+  return (
+    <Chat
+      userId={user.id}
+      aiName={profile.ai_name || "Aurora"}
+      voiceId={profile.voice_id || "pt-female"}
+      onEditProfile={() => setEditing(true)}
+      onSignOut={async () => {
+        await supabase.auth.signOut();
+      }}
+    />
+  );
+};
 
 export default Index;
