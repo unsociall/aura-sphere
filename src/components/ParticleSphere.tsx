@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { SphereState } from "@/lib/types";
+import type { SphereState, ParticleShape } from "@/lib/types";
+import { generateShape } from "@/lib/shapes";
 
 const STATE_HSL: Record<SphereState, [number, number, number]> = {
   idle: [200 / 360, 1, 0.55],
@@ -16,13 +17,31 @@ const STATE_PARAMS: Record<SphereState, { speed: number; scale: number; jitter: 
   responding: { speed: 0.012, scale: 1.25, jitter: 0.035 },
 };
 
-export function ParticleSphere({ state }: { state: SphereState }) {
+export function ParticleSphere({
+  state,
+  shape = "sphere",
+}: {
+  state: SphereState;
+  shape?: ParticleShape;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<SphereState>(state);
+  const shapeRef = useRef<ParticleShape>(shape);
+  const morphRef = useRef<{
+    from: Float32Array;
+    to: Float32Array;
+    t: number; // 0..1
+    active: boolean;
+  } | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // Trigger morph when shape changes
+  useEffect(() => {
+    shapeRef.current = shape;
+  }, [shape]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -44,20 +63,10 @@ export function ParticleSphere({ state }: { state: SphereState }) {
     const COUNT = 2500;
     const positions = new Float32Array(COUNT * 3);
     const basePositions = new Float32Array(COUNT * 3);
-    for (let i = 0; i < COUNT; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(Math.random() * 2 - 1);
-      const r = 1;
-      const x = r * Math.sin(phi) * Math.cos(theta);
-      const y = r * Math.sin(phi) * Math.sin(theta);
-      const z = r * Math.cos(phi);
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = z;
-      basePositions[i * 3] = x;
-      basePositions[i * 3 + 1] = y;
-      basePositions[i * 3 + 2] = z;
-    }
+    const initial = generateShape(shapeRef.current, COUNT);
+    positions.set(initial);
+    basePositions.set(initial);
+    let currentShape: ParticleShape = shapeRef.current;
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -145,6 +154,28 @@ export function ParticleSphere({ state }: { state: SphereState }) {
       currentScale += (params.scale - currentScale) * 0.06;
       points.scale.setScalar(currentScale);
       core.scale.setScalar(currentScale);
+
+      // Detect shape change and start morph
+      if (shapeRef.current !== currentShape) {
+        currentShape = shapeRef.current;
+        morphRef.current = {
+          from: new Float32Array(basePositions),
+          to: generateShape(currentShape, COUNT),
+          t: 0,
+          active: true,
+        };
+      }
+
+      // Advance morph
+      if (morphRef.current?.active) {
+        const m = morphRef.current;
+        m.t = Math.min(1, m.t + 0.018);
+        const e = m.t < 0.5 ? 2 * m.t * m.t : 1 - Math.pow(-2 * m.t + 2, 2) / 2;
+        for (let i = 0; i < COUNT * 3; i++) {
+          basePositions[i] = m.from[i] + (m.to[i] - m.from[i]) * e;
+        }
+        if (m.t >= 1) m.active = false;
+      }
 
       // Inertia
       if (!isDown) {
