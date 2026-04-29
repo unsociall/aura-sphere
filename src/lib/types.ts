@@ -1,5 +1,14 @@
 export type SphereState = "idle" | "listening" | "thinking" | "responding";
 
+export type ParticleShape =
+  | "sphere"
+  | "question"
+  | "wave"
+  | "heart"
+  | "torus"
+  | "galaxy"
+  | "cube";
+
 export type ChatMessage = {
   id?: string;
   role: "user" | "assistant";
