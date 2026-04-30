@@ -283,6 +283,13 @@ export default function Chat({
         <div className="w-full max-w-sm aspect-square max-h-[42vh]">
           <ParticleSphere state={state} shape={shape} volume={liveVolume} />
         </div>
+        <div
+          className={`mt-1 text-xs uppercase tracking-[0.25em] font-medium animate-fade-in ${
+            state === "idle" ? "text-muted-foreground" : "text-primary animate-pulse-ring"
+          }`}
+        >
+          {STATE_LABELS[state]}
+        </div>
       </section>
 
       {/* Messages */}
