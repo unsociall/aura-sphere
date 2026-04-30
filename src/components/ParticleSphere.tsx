@@ -83,16 +83,6 @@ export function ParticleSphere({
     const points = new THREE.Points(geometry, material);
     scene.add(points);
 
-    // Glowing core
-    const coreGeo = new THREE.SphereGeometry(0.45, 32, 32);
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color().setHSL(...STATE_HSL.idle),
-      transparent: true,
-      opacity: 0.18,
-    });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    scene.add(core);
-
     // Resize
     const resize = () => {
       const w = container.clientWidth;
@@ -149,11 +139,9 @@ export function ParticleSphere({
       const params = STATE_PARAMS[s];
       targetColor.setHSL(...STATE_HSL[s]);
       material.color.lerp(targetColor, 0.06);
-      coreMat.color.lerp(targetColor, 0.06);
 
       currentScale += (params.scale - currentScale) * 0.06;
       points.scale.setScalar(currentScale);
-      core.scale.setScalar(currentScale);
 
       // Detect shape change and start morph
       if (shapeRef.current !== currentShape) {
@@ -186,7 +174,6 @@ export function ParticleSphere({
       } else {
         points.rotation.y += params.speed;
       }
-      core.rotation.y = points.rotation.y;
 
       // Particle jitter for active states
       t += 0.016;
@@ -201,8 +188,6 @@ export function ParticleSphere({
       }
       pos.needsUpdate = true;
 
-      coreMat.opacity = 0.15 + Math.sin(t * 2) * 0.05 + (s === "idle" ? 0 : 0.08);
-
       renderer.render(scene, camera);
     };
     animate();
@@ -216,8 +201,6 @@ export function ParticleSphere({
       dom.removeEventListener("pointercancel", onUp);
       geometry.dispose();
       material.dispose();
-      coreGeo.dispose();
-      coreMat.dispose();
       renderer.dispose();
       if (dom.parentNode) dom.parentNode.removeChild(dom);
     };
