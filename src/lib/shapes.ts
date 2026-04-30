@@ -6,12 +6,15 @@ export function generateShape(shape: ParticleShape, count: number): Float32Array
   const out = new Float32Array(count * 3);
   switch (shape) {
     case "sphere": {
+      // Fibonacci sphere — evenly spaced points like the reference GIF.
+      const phi = Math.PI * (Math.sqrt(5) - 1); // golden angle
       for (let i = 0; i < count; i++) {
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(Math.random() * 2 - 1);
-        out[i * 3] = Math.sin(phi) * Math.cos(theta);
-        out[i * 3 + 1] = Math.sin(phi) * Math.sin(theta);
-        out[i * 3 + 2] = Math.cos(phi);
+        const y = 1 - (i / Math.max(1, count - 1)) * 2; // 1..-1
+        const radius = Math.sqrt(1 - y * y);
+        const theta = phi * i;
+        out[i * 3] = Math.cos(theta) * radius;
+        out[i * 3 + 1] = y;
+        out[i * 3 + 2] = Math.sin(theta) * radius;
       }
       return out;
     }
