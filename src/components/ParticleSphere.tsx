@@ -3,18 +3,15 @@ import * as THREE from "three";
 import type { SphereState, ParticleShape } from "@/lib/types";
 import { generateShape } from "@/lib/shapes";
 
-const STATE_HSL: Record<SphereState, [number, number, number]> = {
-  idle: [200 / 360, 1, 0.55],
-  listening: [165 / 360, 1, 0.55],
-  thinking: [50 / 360, 1, 0.6],
-  responding: [290 / 360, 1, 0.65],
-};
-
-const STATE_PARAMS: Record<SphereState, { speed: number; scale: number; jitter: number }> = {
-  idle: { speed: 0.0015, scale: 1, jitter: 0.003 },
-  listening: { speed: 0.008, scale: 1.08, jitter: 0.02 },
-  thinking: { speed: 0.02, scale: 1.18, jitter: 0.05 },
-  responding: { speed: 0.012, scale: 1.25, jitter: 0.035 },
+// Monochrome design — all states share the same color, only motion changes.
+const STATE_PARAMS: Record<
+  SphereState,
+  { speed: number; scale: number; jitter: number; ringIntensity: number; opacity: number }
+> = {
+  idle:       { speed: 0.0015, scale: 1.00, jitter: 0.003, ringIntensity: 0.15, opacity: 0.85 },
+  listening:  { speed: 0.008,  scale: 1.05, jitter: 0.018, ringIntensity: 0.9,  opacity: 1.0  },
+  thinking:   { speed: 0.02,   scale: 1.10, jitter: 0.04,  ringIntensity: 0.5,  opacity: 0.95 },
+  responding: { speed: 0.012,  scale: 1.08, jitter: 0.022, ringIntensity: 1.0,  opacity: 1.0  },
 };
 
 export function ParticleSphere({
@@ -72,8 +69,8 @@ export function ParticleSphere({
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
     const material = new THREE.PointsMaterial({
-      size: 0.025,
-      color: new THREE.Color().setHSL(...STATE_HSL.idle),
+      size: 0.022,
+      color: new THREE.Color(0xffffff),
       transparent: true,
       opacity: 0.9,
       blending: THREE.AdditiveBlending,
@@ -82,6 +79,38 @@ export function ParticleSphere({
 
     const points = new THREE.Points(geometry, material);
     scene.add(points);
+
+    // Orbital rings (equator + two polar caps), like the reference GIF.
+    const buildRing = (radius: number, particles: number, yOffset = 0, tilt = 0) => {
+      const arr = new Float32Array(particles * 3);
+      for (let i = 0; i < particles; i++) {
+        const a = (i / particles) * Math.PI * 2;
+        const x = Math.cos(a) * radius;
+        const z = Math.sin(a) * radius;
+        const y = yOffset + Math.sin(a + tilt) * 0.0;
+        arr[i * 3] = x;
+        arr[i * 3 + 1] = y;
+        arr[i * 3 + 2] = z;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+      const m = new THREE.PointsMaterial({
+        size: 0.028,
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      return new THREE.Points(g, m);
+    };
+    const ringEquator = buildRing(1.0, 260, 0);
+    const ringTop = buildRing(0.45, 140, 0.88);
+    const ringTop2 = buildRing(0.28, 100, 0.95);
+    const ringBottom = buildRing(0.45, 140, -0.88);
+    const ringBottom2 = buildRing(0.28, 100, -0.95);
+    const rings = [ringEquator, ringTop, ringTop2, ringBottom, ringBottom2];
+    rings.forEach((r) => scene.add(r));
 
     // Resize
     const resize = () => {
@@ -128,8 +157,8 @@ export function ParticleSphere({
     dom.addEventListener("pointercancel", onUp);
 
     // Animation
-    const targetColor = new THREE.Color().setHSL(...STATE_HSL.idle);
     let currentScale = 1;
+    let ringOpacity = 0;
     let t = 0;
     let raf = 0;
 
@@ -137,11 +166,25 @@ export function ParticleSphere({
       raf = requestAnimationFrame(animate);
       const s = stateRef.current;
       const params = STATE_PARAMS[s];
-      targetColor.setHSL(...STATE_HSL[s]);
-      material.color.lerp(targetColor, 0.06);
 
       currentScale += (params.scale - currentScale) * 0.06;
       points.scale.setScalar(currentScale);
+      material.opacity += (params.opacity - material.opacity) * 0.06;
+
+      // Ring fade in/out per state
+      ringOpacity += (params.ringIntensity - ringOpacity) * 0.05;
+      rings.forEach((r, i) => {
+        const mat = r.material as THREE.PointsMaterial;
+        const pulse = 0.85 + Math.sin(t * 3 + i) * 0.15;
+        mat.opacity = ringOpacity * pulse;
+        r.scale.setScalar(currentScale);
+      });
+      // Counter-rotate rings for an orbital feel
+      ringEquator.rotation.y += 0.012 + params.speed;
+      ringTop.rotation.y -= 0.02;
+      ringTop2.rotation.y -= 0.035;
+      ringBottom.rotation.y -= 0.02;
+      ringBottom2.rotation.y -= 0.035;
 
       // Detect shape change and start morph
       if (shapeRef.current !== currentShape) {
@@ -201,6 +244,10 @@ export function ParticleSphere({
       dom.removeEventListener("pointercancel", onUp);
       geometry.dispose();
       material.dispose();
+      rings.forEach((r) => {
+        r.geometry.dispose();
+        (r.material as THREE.PointsMaterial).dispose();
+      });
       renderer.dispose();
       if (dom.parentNode) dom.parentNode.removeChild(dom);
     };
