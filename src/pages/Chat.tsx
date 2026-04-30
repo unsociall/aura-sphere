@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { ChatMessage, ParticleShape, SphereState, VoiceId } from "@/lib/types";
 import { createRecognition, getVoiceConfig, speak, stopSpeaking } from "@/lib/speech";
 import { inferShape } from "@/lib/shapes";
+import { useVoiceActivity } from "@/hooks/useVoiceActivity";
 import { toast } from "sonner";
 
 const STATE_LABELS: Record<SphereState, string> = {
@@ -38,6 +39,42 @@ export default function Chat({
   const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lang = getVoiceConfig(voiceId).lang;
+
+  // Live mic volume — drives particle vibration. Active only while recording.
+  const { volume: micVolume, active: micActive } = useVoiceActivity(recording);
+
+  // While the AI speaks (state === "responding"), simulate a soft volume so
+  // the particles also "speak". Otherwise use the live mic volume.
+  const [ttsPulse, setTtsPulse] = useState(0);
+  useEffect(() => {
+    if (state !== "responding") {
+      setTtsPulse(0);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const loop = () => {
+      const t = (performance.now() - start) / 1000;
+      // pseudo-speech envelope
+      const v =
+        0.18 +
+        Math.abs(Math.sin(t * 6.2)) * 0.18 +
+        Math.abs(Math.sin(t * 2.7 + 1.3)) * 0.12;
+      setTtsPulse(Math.min(0.6, v));
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [state]);
+
+  const liveVolume = recording ? micVolume : ttsPulse;
+
+  // Auto-switch to "listening" while the user actually speaks into the mic.
+  useEffect(() => {
+    if (recording && micActive && state !== "listening") {
+      setState("listening");
+    }
+  }, [recording, micActive, state]);
 
   // Load history
   useEffect(() => {
@@ -244,7 +281,7 @@ export default function Chat({
       {/* Sphere */}
       <section className="relative flex flex-col items-center justify-center px-4 pt-2 pb-1">
         <div className="w-full max-w-sm aspect-square max-h-[42vh]">
-          <ParticleSphere state={state} shape={shape} />
+          <ParticleSphere state={state} shape={shape} volume={liveVolume} />
         </div>
         <div
           className={`mt-1 text-xs uppercase tracking-[0.25em] font-medium animate-fade-in ${
