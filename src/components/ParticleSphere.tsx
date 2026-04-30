@@ -6,24 +6,37 @@ import { generateShape } from "@/lib/shapes";
 // Monochrome design — all states share the same color, only motion changes.
 const STATE_PARAMS: Record<
   SphereState,
-  { speed: number; scale: number; jitter: number; ringIntensity: number; opacity: number }
+  {
+    speed: number;
+    scale: number;
+    jitter: number;
+    ringIntensity: number;
+    opacity: number;
+    density: number; // visual size of each dot
+    pulseRate: number; // breathing speed
+  }
 > = {
-  idle:       { speed: 0.0015, scale: 1.00, jitter: 0.003, ringIntensity: 0.15, opacity: 0.85 },
-  listening:  { speed: 0.008,  scale: 1.05, jitter: 0.018, ringIntensity: 0.9,  opacity: 1.0  },
-  thinking:   { speed: 0.02,   scale: 1.10, jitter: 0.04,  ringIntensity: 0.5,  opacity: 0.95 },
-  responding: { speed: 0.012,  scale: 1.08, jitter: 0.022, ringIntensity: 1.0,  opacity: 1.0  },
+  // Idle = pause mode: slow drift, dim rings, almost no jitter.
+  idle:       { speed: 0.0010, scale: 0.98, jitter: 0.002, ringIntensity: 0.08, opacity: 0.55, density: 0.030, pulseRate: 0.6 },
+  listening:  { speed: 0.006,  scale: 1.04, jitter: 0.020, ringIntensity: 0.85, opacity: 0.95, density: 0.038, pulseRate: 1.6 },
+  thinking:   { speed: 0.015,  scale: 1.08, jitter: 0.035, ringIntensity: 0.45, opacity: 0.85, density: 0.034, pulseRate: 2.4 },
+  responding: { speed: 0.010,  scale: 1.06, jitter: 0.024, ringIntensity: 1.00, opacity: 1.00, density: 0.040, pulseRate: 2.0 },
 };
 
 export function ParticleSphere({
   state,
   shape = "sphere",
+  volume = 0,
 }: {
   state: SphereState;
   shape?: ParticleShape;
+  /** External audio volume 0..1 — boosts vibration & ring intensity in real time */
+  volume?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<SphereState>(state);
   const shapeRef = useRef<ParticleShape>(shape);
+  const volumeRef = useRef<number>(volume);
   const morphRef = useRef<{
     from: Float32Array;
     to: Float32Array;
@@ -41,6 +54,10 @@ export function ParticleSphere({
   }, [shape]);
 
   useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
@@ -56,8 +73,8 @@ export function ParticleSphere({
     renderer.domElement.style.height = "100%";
     renderer.domElement.style.touchAction = "none";
 
-    // Particles on a sphere
-    const COUNT = 2500;
+    // Far fewer, evenly-spaced particles — like the reference GIF.
+    const COUNT = 420;
     const positions = new Float32Array(COUNT * 3);
     const basePositions = new Float32Array(COUNT * 3);
     const initial = generateShape(shapeRef.current, COUNT);
@@ -69,10 +86,11 @@ export function ParticleSphere({
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
     const material = new THREE.PointsMaterial({
-      size: 0.022,
+      size: 0.038,
+      sizeAttenuation: true,
       color: new THREE.Color(0xffffff),
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.55,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -104,11 +122,12 @@ export function ParticleSphere({
       });
       return new THREE.Points(g, m);
     };
-    const ringEquator = buildRing(1.0, 260, 0);
-    const ringTop = buildRing(0.45, 140, 0.88);
-    const ringTop2 = buildRing(0.28, 100, 0.95);
-    const ringBottom = buildRing(0.45, 140, -0.88);
-    const ringBottom2 = buildRing(0.28, 100, -0.95);
+    // Sparser rings, evenly spaced.
+    const ringEquator = buildRing(1.0, 90, 0);
+    const ringTop = buildRing(0.55, 60, 0.82);
+    const ringTop2 = buildRing(0.30, 40, 0.95);
+    const ringBottom = buildRing(0.55, 60, -0.82);
+    const ringBottom2 = buildRing(0.30, 40, -0.95);
     const rings = [ringEquator, ringTop, ringTop2, ringBottom, ringBottom2];
     rings.forEach((r) => scene.add(r));
 
@@ -159,6 +178,8 @@ export function ParticleSphere({
     // Animation
     let currentScale = 1;
     let ringOpacity = 0;
+    let currentDensity = 0.038;
+    let currentOpacity = 0.55;
     let t = 0;
     let raf = 0;
 
@@ -166,25 +187,41 @@ export function ParticleSphere({
       raf = requestAnimationFrame(animate);
       const s = stateRef.current;
       const params = STATE_PARAMS[s];
+      const vol = volumeRef.current; // 0..1
+      const volBoost = Math.min(1, vol * 4); // amplify low input
 
-      currentScale += (params.scale - currentScale) * 0.06;
+      // Smooth transitions in/out of pause (idle).
+      const targetScale = params.scale + volBoost * 0.06;
+      currentScale += (targetScale - currentScale) * 0.05;
       points.scale.setScalar(currentScale);
-      material.opacity += (params.opacity - material.opacity) * 0.06;
 
-      // Ring fade in/out per state
-      ringOpacity += (params.ringIntensity - ringOpacity) * 0.05;
+      const targetOpacity = params.opacity + volBoost * 0.1;
+      currentOpacity += (targetOpacity - currentOpacity) * 0.05;
+      material.opacity = currentOpacity;
+
+      // Pulse particle size (density) per state — GIF-like breathing.
+      const breath = 1 + Math.sin(t * params.pulseRate) * 0.12;
+      const targetDensity = params.density * breath + volBoost * 0.012;
+      currentDensity += (targetDensity - currentDensity) * 0.08;
+      material.size = currentDensity;
+
+      // Ring fade in/out per state — smoothly fade to near-zero in pause.
+      const targetRing = params.ringIntensity + volBoost * 0.4;
+      ringOpacity += (targetRing - ringOpacity) * 0.04;
       rings.forEach((r, i) => {
         const mat = r.material as THREE.PointsMaterial;
-        const pulse = 0.85 + Math.sin(t * 3 + i) * 0.15;
+        const pulse = 0.7 + Math.sin(t * params.pulseRate + i * 0.8) * 0.3;
         mat.opacity = ringOpacity * pulse;
+        mat.size = 0.026 + currentDensity * 0.2;
         r.scale.setScalar(currentScale);
       });
       // Counter-rotate rings for an orbital feel
-      ringEquator.rotation.y += 0.012 + params.speed;
-      ringTop.rotation.y -= 0.02;
-      ringTop2.rotation.y -= 0.035;
-      ringBottom.rotation.y -= 0.02;
-      ringBottom2.rotation.y -= 0.035;
+      const ringSpeedScale = 0.3 + ringOpacity; // slow when paused
+      ringEquator.rotation.y += (0.010 + params.speed) * ringSpeedScale;
+      ringTop.rotation.y -= 0.018 * ringSpeedScale;
+      ringTop2.rotation.y -= 0.030 * ringSpeedScale;
+      ringBottom.rotation.y -= 0.018 * ringSpeedScale;
+      ringBottom2.rotation.y -= 0.030 * ringSpeedScale;
 
       // Detect shape change and start morph
       if (shapeRef.current !== currentShape) {
@@ -218,13 +255,13 @@ export function ParticleSphere({
         points.rotation.y += params.speed;
       }
 
-      // Particle jitter for active states
+      // Particle jitter for active states — boosted by live volume.
       t += 0.016;
       const pos = geometry.getAttribute("position") as THREE.BufferAttribute;
-      const j = params.jitter;
+      const j = params.jitter + volBoost * 0.05;
       for (let i = 0; i < COUNT; i++) {
         const ix = i * 3;
-        const wave = Math.sin(t * 2 + i * 0.3) * j;
+        const wave = Math.sin(t * (1.5 + params.pulseRate) + i * 0.35) * j;
         pos.array[ix] = basePositions[ix] * (1 + wave);
         pos.array[ix + 1] = basePositions[ix + 1] * (1 + wave);
         pos.array[ix + 2] = basePositions[ix + 2] * (1 + wave);
