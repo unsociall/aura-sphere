@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Mic, MicOff, LogOut, Settings } from "lucide-react";
+import { Send, Mic, MicOff, LogOut, Settings, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ParticleSphere } from "@/components/ParticleSphere";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import type { ChatMessage, ParticleShape, SphereState, VoiceId } from "@/lib/types";
+import type { AiProvider, ChatMessage, ParticleShape, SphereState, VoiceId } from "@/lib/types";
 import { createRecognition, getVoiceConfig, speak, stopSpeaking } from "@/lib/speech";
 import { inferShape } from "@/lib/shapes";
 import { useVoiceActivity } from "@/hooks/useVoiceActivity";
@@ -17,6 +18,12 @@ const STATE_LABELS: Record<SphereState, string> = {
   thinking: "Pensando…",
   responding: "Respondendo…",
 };
+
+const AI_PROVIDER_OPTIONS: { id: AiProvider; label: string }[] = [
+  { id: "lovable", label: "Lovable" },
+  { id: "anthropic", label: "Anthropic / Claude" },
+  { id: "openai", label: "OpenAI" },
+];
 
 export default function Chat({
   userId,
@@ -33,9 +40,13 @@ export default function Chat({
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [provider, setProvider] = useState<AiProvider>("lovable");
   const [state, setState] = useState<SphereState>("idle");
   const [shape, setShape] = useState<ParticleShape>("sphere");
   const [recording, setRecording] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
+  const [searching, setSearching] = useState(false);
   const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lang = getVoiceConfig(voiceId).lang;
@@ -85,7 +96,7 @@ export default function Chat({
       .order("created_at", { ascending: true })
       .limit(100)
       .then(({ data }) => {
-        if (data) setMessages(data.map((m) => ({ id: m.id, role: m.role as any, content: m.content })));
+        if (data) setMessages(data.map((m) => ({ id: m.id, role: (m.role as 'user' | 'assistant'), content: m.content })));
       });
   }, [userId]);
 
@@ -109,7 +120,53 @@ export default function Chat({
   }, [messages]);
 
   const persist = async (msg: ChatMessage) => {
-    await supabase.from("chat_messages").insert({ user_id: userId, role: msg.role, content: msg.content });
+    const { error } = await supabase
+      .from("chat_messages")
+      .insert({ user_id: userId, role: msg.role, content: msg.content });
+    if (error) {
+      console.error("Persist error", error);
+      toast.error("Não foi possível salvar a mensagem.");
+    }
+  };
+
+  const searchMessages = async (query = searchQuery) => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearching(true);
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("id, role, content")
+      .ilike("content", `%${trimmed}%`)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    setSearching(false);
+    if (error) {
+      console.error("Search error", error);
+      toast.error("Erro ao buscar na conversa.");
+      return;
+    }
+
+    setSearchResults(data ?? []);
+  };
+
+  const clearChat = async () => {
+    const { error } = await supabase.from("chat_messages").delete().eq("user_id", userId);
+    if (error) {
+      console.error("Clear chat error", error);
+      toast.error("Não foi possível limpar a conversa.");
+      return;
+    }
+
+    setMessages([]);
+    setSearchResults([]);
+    setSearchQuery("");
+    toast.success("Conversa limpa com sucesso.");
   };
 
   const sendText = async (text: string) => {
@@ -135,6 +192,7 @@ export default function Chat({
         },
         body: JSON.stringify({
           aiName,
+          provider,
           messages: next.map(({ role, content }) => ({ role, content })),
         }),
       });
@@ -214,7 +272,7 @@ export default function Chat({
       return;
     }
     let finalText = "";
-    rec.onresult = (e: any) => {
+    rec.onresult = (e: SpeechRecognitionEvent) => {
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
@@ -223,7 +281,7 @@ export default function Chat({
       }
       setInput((finalText + interim).trim());
     };
-    rec.onerror = (e: any) => {
+    rec.onerror = (e: SpeechRecognitionErrorEvent) => {
       console.error("STT error", e);
       if (e.error === "not-allowed") toast.error("Permissão de microfone negada");
       setRecording(false);
@@ -277,6 +335,100 @@ export default function Chat({
           </Button>
         </div>
       </header>
+
+      <section className="px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Provedor</span>
+            <div className="w-full max-w-xs">
+              <Select value={provider} onValueChange={(value) => setProvider(value as AiProvider)}>
+                <SelectTrigger className="w-full h-10">
+                  <SelectValue placeholder="Selecionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {AI_PROVIDER_OPTIONS.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Usando: {AI_PROVIDER_OPTIONS.find((option) => option.id === provider)?.label}</p>
+        </div>
+      </section>
+
+      <section className="border-b border-border/50 px-4 py-3 bg-background/80 backdrop-blur-sm">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            searchMessages(searchQuery);
+          }}
+          className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex flex-1 gap-2">
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar na conversa"
+              className="h-12 text-base"
+              disabled={searching}
+            />
+            <Button
+              type="submit"
+              variant="secondary"
+              size="icon"
+              disabled={!searchQuery.trim() || searching}
+              aria-label="Buscar"
+            >
+              <Search className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-12"
+              onClick={() => searchMessages(searchQuery)}
+              disabled={!searchQuery.trim() || searching}
+            >
+              {searching ? "Buscando…" : "Buscar"}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="h-12"
+              onClick={clearChat}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />Limpar conversa
+            </Button>
+          </div>
+        </form>
+
+        {searchResults.length > 0 ? (
+          <div className="mt-4 space-y-3">
+            <p className="text-sm font-medium">Resultados da busca</p>
+            <div className="grid gap-2">
+              {searchResults.map((result) => (
+                <div key={result.id} className="rounded-2xl border border-border/70 bg-card p-3 text-sm">
+                  <p className="text-xs text-muted-foreground uppercase tracking-[0.2em] mb-1">
+                    {result.role === "assistant" ? "Assistente" : "Você"}
+                  </p>
+                  <p className="whitespace-pre-wrap">{result.content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : searchQuery.trim() && !searching ? (
+          <div className="mt-4 rounded-2xl border border-border/70 bg-card p-3 text-sm text-muted-foreground">
+            Nenhum resultado encontrado para <strong>{searchQuery}</strong>.
+          </div>
+        ) : null}
+      </section>
 
       {/* Sphere */}
       <section className="relative flex flex-col items-center justify-center px-4 pt-2 pb-1">

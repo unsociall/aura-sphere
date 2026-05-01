@@ -51,13 +51,13 @@ type RecognitionLike = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
-  onresult: ((e: any) => void) | null;
-  onerror: ((e: any) => void) | null;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  onerror: ((e: SpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
 };
 
 export function createRecognition(lang: string): RecognitionLike | null {
-  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const SR = ((window as Record<string, unknown>).SpeechRecognition || (window as Record<string, unknown>).webkitSpeechRecognition) as typeof SpeechRecognition | undefined;
   if (!SR) return null;
   const rec: RecognitionLike = new SR();
   rec.lang = lang;

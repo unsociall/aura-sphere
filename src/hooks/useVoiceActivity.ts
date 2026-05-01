@@ -27,7 +27,7 @@ export function useVoiceActivity(enabled: boolean) {
           return;
         }
         streamRef.current = stream;
-        const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+        const Ctx = (window.AudioContext || (window as Record<string, unknown>).webkitAudioContext) as typeof AudioContext;
         const ctx: AudioContext = new Ctx();
         ctxRef.current = ctx;
         const src = ctx.createMediaStreamSource(stream);

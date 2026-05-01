@@ -11,8 +11,30 @@ export type ParticleShape =
 
 export type ChatMessage = {
   id?: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
+};
+
+export type LocalProfile = {
+  tone: "friendly" | "professional" | "creative" | "direct";
+  interests: string;
+  personality: string;
+  autoMode: boolean;
+};
+
+export type ProjectTask = {
+  id: string;
+  title: string;
+  completed: boolean;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  description: string;
+  status: "pending" | "in-progress" | "done";
+  tasks: ProjectTask[];
+  createdAt: string;
 };
 
 export const VOICE_OPTIONS = [
@@ -22,4 +44,11 @@ export const VOICE_OPTIONS = [
   { id: "en-male", label: "Orion (EN masculina)", lang: "en-US", gender: "male" },
 ] as const;
 
+export const AI_PROVIDER_OPTIONS = [
+  { id: "lovable", label: "Lovable" },
+  { id: "anthropic", label: "Anthropic / Claude" },
+  { id: "openai", label: "OpenAI" },
+] as const;
+
 export type VoiceId = (typeof VOICE_OPTIONS)[number]["id"];
+export type AiProvider = (typeof AI_PROVIDER_OPTIONS)[number]["id"];

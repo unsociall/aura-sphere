@@ -1,0 +1,8 @@
+node_modules
+packages/frontend/node_modules
+packages/bridge/__pycache__
+packages/mempalace/__pycache__
+.env
+.git
+.DS_Store
+npm-debug.log
